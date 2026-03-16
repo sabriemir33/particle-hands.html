@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>✦ Parçacık Evreni - Tablet</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000810;font-family:'Space Mono',monospace;color:#00f5ff}
+#app{position:relative;width:100vw;height:100vh}
+#video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#cam-canvas{position:absolute;top:0;left:0;width:100%;height:100%;opacity:.07;transform:scaleX(-1)}
+#main-canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+#ui{position:absolute;top:0;left:0;right:0;padding:14px 18px;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none;z-index:10}
+.logo{font-size:10px;letter-spacing:.2em;text-transform:uppercase;line-height:1.6}
+.logo span{opacity:.4;display:block;font-size:8px;margin-top:2px}
+#sbadge{font-size:8px;letter-spacing:.12em;text-transform:uppercase;padding:4px 10px;border:1px solid #fff2;border-radius:2px;transition:color .15s,border-color .15s;color:#fff3}
+#sbadge.g1{color:#ff6bcd;border-color:#ff6bcd}
+#sbadge.g2{color:#00f5ff;border-color:#00f5ff}
+#sbadge.g3{color:#7bff6b;border-color:#7bff6b}
+#sbadge.g4{color:#ffaa00;border-color:#ffaa00}
+#sbadge.g5{color:#aaaaff;border-color:#aaaaff}
+#sbadge.g6{color:#ff4444;border-color:#ff4444}
+#sbadge.g7{color:#00ffaa;border-color:#00ffaa}
+#hints{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:8px;letter-spacing:.14em;color:#00f5ff;opacity:.3;text-align:center;pointer-events:none;z-index:10;white-space:nowrap;transition:opacity .3s}
+#fps{position:absolute;bottom:14px;right:14px;font-size:8px;letter-spacing:.1em;opacity:.2;z-index:10;pointer-events:none}
+#gguide{position:absolute;left:14px;bottom:36px;font-size:7.5px;letter-spacing:.09em;opacity:.2;z-index:10;pointer-events:none;line-height:2;color:#00f5ff}
+#overlay{position:absolute;inset:0;background:#000810;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;gap:22px;transition:opacity .6s}
+#overlay.hidden{opacity:0;pointer-events:none}
+.otitle{font-size:clamp(16px,3.5vw,28px);letter-spacing:.1em;text-shadow:0 0 20px #00f5ff88;text-align:center}
+#sbtn{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#000810;background:#00f5ff;border:none;padding:12px 32px;cursor:pointer;box-shadow:0 0 20px #00f5ff55}
+#ldr{display:none;flex-direction:column;align-items:center;gap:10px}
+#ldr.show{display:flex}
+.lring{width:34px;height:34px;border:1px solid #00f5ff22;border-top-color:#00f5ff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#errmsg{display:none;font-size:9px;color:#ff6b9d;text-align:center;text-transform:uppercase}
+#errmsg.show{display:block}
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="cam-canvas"></canvas>
+  <canvas id="main-canvas"></canvas>
+  <div id="ui">
+    <div class="logo">✦ Parçacık Evreni<span>El Hareketi → Tablet Lite</span></div>
+    <div id="sbadge">Bekleniyor</div>
+  </div>
+  <div id="gguide">
+    ✊ Yumruk → Mıknatıs | ☝ İşaret → İtici<br>
+    ✌ Barış → Girdap | 🤟 Üç → Patlama<br>
+    🖐 Dört → Yavaş | ✋ Beş → Ateş<br>
+    👍 Baş Parmak → Spiral
+  </div>
+  <div id="hints">ELİNİ KAMERAYA GÖSTER</div>
+  <div id="fps"></div>
+  <div id="overlay">
+    <div class="otitle">✦ PARÇACIK EVRENİ LITE</div>
+    <button id="sbtn">Kamerayı Başlat</button>
+    <div id="ldr"><div class="lring"></div><div class="ltxt">Yükleniyor…</div></div>
+    <div id="errmsg"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+const N = 60;
+const FRICTION = 0.88;
+const video = document.getElementById('video');
+const camCvs = document.getElementById('cam-canvas');
+const mainCvs = document.getElementById('main-canvas');
+const camCtx = camCvs.getContext('2d');
+const ctx = mainCvs.getContext('2d', { alpha: false });
+const sbadge = document.getElementById('sbadge');
+const hintsEl = document.getElementById('hints');
+const fpsEl = document.getElementById('fps');
+const overlay = document.getElementById('overlay');
+
+let W = 0, H = 0;
+const px = new Float32Array(N), py = new Float32Array(N);
+const pvx = new Float32Array(N), pvy = new Float32Array(N);
+const px_ox = new Float32Array(N), px_oy = new Float32Array(N);
+const pr = new Float32Array(N);
+const pcolor = [];
+
+let gesture = 0, palmX = 0, palmY = 0, prevGesture = 0;
+let exploded = false, spiralAngle = 0, ringPhase = 0;
+let camFrameSkip = 0; 
+let isProcessing = false;
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  mainCvs.width = camCvs.width = W;
+  mainCvs.height = camCvs.height = H;
+  for (let i = 0; i < N; i++) { px_ox[i] = Math.random() * W; px_oy[i] = Math.random() * H; }
+}
+window.addEventListener('resize', resize);
+
+function initParticles() {
+  for (let i = 0; i < N; i++) {
+    px[i] = px_ox[i] = Math.random() * W;
+    py[i] = px_oy[i] = Math.random() * H;
+    pr[i] = 1.8 + Math.random() * 2;
+    const hue = 180 + Math.random() * 40 | 0;
+    pcolor[i] = `hsl(${hue},80%,60%)`;
+  }
+}
+
+function ext(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+function classify(lm) {
+  const i = ext(lm,8,6), m = ext(lm,12,10), ri = ext(lm,16,14), p = ext(lm,20,18), th = lm[4].x < lm[3].x;
+  const cnt = (i?1:0)+(m?1:0)+(ri?1:0)+(p?1:0)+(th?1:0);
+  if (!i&&!m&&!ri&&!p&&!th) return 1;
+  if ( i&&!m&&!ri&&!p&&!th) return 2;
+  if ( i&& m&&!ri&&!p&&!th) return 3;
+  if ( i&& m&& ri&&!p&&!th) return 4;
+  if ( i&& m&& ri&& p&&!th) return 5;
+  if (cnt >= 5)              return 6;
+  if (!i&&!m&&!ri&&!p&& th) return 7;
+  return 0;
+}
+
+const LABELS = ['El Yok','✊ Mıknatıs','☝ İtici','✌ Girdap','💥 Patlama','🌊 Yavaş','🔥 Ateş','👍 Spiral'];
+const CLASSES = ['','g1','g2','g3','g4','g5','g6','g7'];
+
+function onResults(res) {
+  if (res.image && (camFrameSkip++ % 3 === 0)) {
+    camCtx.save(); camCtx.clearRect(0,0,W,H);
+    camCtx.scale(-1,1); camCtx.drawImage(res.image,-W,0,W,H);
+    camCtx.restore();
+  }
+  if (res.multiHandLandmarks && res.multiHandLandmarks.length) {
+    const lm = res.multiHandLandmarks[0];
+    gesture = classify(lm);
+    let sx=0, sy=0;
+    const idx=[0,5,9,13,17];
+    for (let k=0;k<5;k++){sx+=lm[idx[k]].x;sy+=lm[idx[k]].y;}
+    palmX = (1-sx/5)*W; palmY = (sy/5)*H;
+    if (gesture===4 && prevGesture!==4) exploded=false;
+    prevGesture = gesture;
+    sbadge.textContent = LABELS[gesture];
+    sbadge.className = CLASSES[gesture];
+    hintsEl.style.opacity='.05';
+  } else {
+    gesture=0; sbadge.textContent='Bekleniyor'; sbadge.className=''; hintsEl.style.opacity='.3';
+  }
+  isProcessing = false;
+}
+
+function update() {
+  spiralAngle += 0.05; ringPhase += 0.07;
+  if (gesture===4 && !exploded) {
+    exploded=true;
+    for (let i=0;i<N;i++){
+      const dx=px[i]-palmX, dy=py[i]-palmY;
+      const len=Math.sqrt(dx*dx+dy*dy)+1;
+      pvx[i]+=(dx/len)*18; pvy[i]+=(dy/len)*18;
+    }
+  }
+  for (let i=0;i<N;i++){
+    const dx=palmX-px[i], dy=palmY-py[i];
+    const dist=Math.sqrt(dx*dx+dy*dy)+1;
+    const nx=dx/dist, ny=dy/dist;
+
+    if      (gesture===1){ pvx[i]+=nx*0.4; pvy[i]+=ny*0.4; }
+    else if (gesture===2){ const f=Math.max(0,1-dist/200)*5; pvx[i]-=nx*f; pvy[i]-=ny*f; }
+    else if (gesture===3){ const w=Math.max(0,1-dist/250)*3.5; pvx[i]+=(-ny)*w+nx*0.4; pvy[i]+=(nx)*w+ny*0.4; }
+    else if (gesture===6){ const tr=130+(ringPhase%6.28<3.14?1:-1)*15; const dr=dist-tr; pvx[i]+=nx*dr*0.05; pvy[i]+=ny*dr*0.05; pvx[i]+=(-ny)*2; pvy[i]+=(nx)*2; }
+    else if (gesture===7){ const angle=spiralAngle+i*(6.28/N); const sr=50+(i/N)*140; pvx[i]+=(palmX+Math.cos(angle)*sr-px[i])*0.07; pvy[i]+=(palmY+Math.sin(angle)*sr-py[i])*0.07; }
+    else { pvx[i]+=(px_ox[i]-px[i])*0.013; pvy[i]+=(px_oy[i]-py[i])*0.013; }
+
+    pvx[i]*=FRICTION; pvy[i]*=FRICTION;
+    px[i]+=pvx[i]; py[i]+=pvy[i];
+  }
+}
+
+const BG = 'rgba(0,8,16,.28)';
+
+function draw() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0,0,W,H);
+  for (let i=0;i<N;i++){
+    ctx.fillStyle = pcolor[i];
+    ctx.beginPath();
+    ctx.arc(px[i], py[i], pr[i], 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+let lastTs=0, fpsCounter=0, fpsTime=0;
+function loop(ts) {
+  if (ts - lastTs >= 33) {
+    update(); draw();
+    fpsCounter++;
+    if (ts - fpsTime >= 1000) {
+      fpsEl.textContent = fpsCounter + ' fps';
+      fpsCounter=0; fpsTime=ts;
+    }
+    lastTs = ts;
+  }
+  requestAnimationFrame(loop);
+}
+
+document.getElementById('sbtn').addEventListener('click', async () => {
+  document.getElementById('sbtn').style.display='none';
+  document.getElementById('ldr').classList.add('show');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'user', width:160, height:120}
+    });
+    video.srcObject=stream; await video.play();
+    palmX=W/2; palmY=H/2;
+    resize(); initParticles();
+
+    const hands = new Hands({locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({
+      maxNumHands:1,
+      modelComplexity:0,
+      minDetectionConfidence:0.55,
+      minTrackingConfidence:0.45
+    });
+    hands.onResults(onResults);
+
+    setInterval(async()=>{ 
+      if(video.readyState>=2 && !isProcessing) {
+        isProcessing = true;
+        await hands.send({image:video}); 
+      }
+    }, 80);
+
+    overlay.classList.add('hidden');
+    requestAnimationFrame(loop);
+  } catch(err) {
+    document.getElementById('errmsg').classList.add('show');
+    document.getElementById('errmsg').textContent='Hata: '+err.message;
+  }
+});
+</script>
+</body>
+</html>
