@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>✦ Süper Elastik İpler</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+        #app { position: relative; width: 100vw; height: 100vh; }
+        
+        /* Kamera Görüntüsü */
+        #video {
+            position: absolute; width: 100%; height: 100%; object-fit: cover;
+            transform: scaleX(-1); /* Ayna Modu */
+        }
+        
+        /* Çizim Katmanı */
+        #main-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            transform: scaleX(-1); /* Çizimleri de aynala ki parmakla eşleşsin */
+            pointer-events: none;
+        }
+
+        /* Başlatma Ekranı */
+        #overlay {
+            position: absolute; inset: 0; background: rgba(0, 10, 20, 0.9);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+        }
+        #overlay.hidden { display: none; }
+        
+        #sbtn {
+            padding: 20px 60px; font-size: 20px; font-weight: bold; color: #000;
+            background: #00f5ff; border: none; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 0 30px rgba(0, 245, 255, 0.5); transition: 0.3s;
+        }
+        #sbtn:active { transform: scale(0.95); }
+        .info { color: #00f5ff; margin-top: 20px; opacity: 0.7; font-size: 14px; text-align: center; line-height: 1.6; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="main-canvas"></canvas>
+    
+    <div id="overlay">
+        <button id="sbtn">SİSTEMİ BAŞLAT</button>
+        <div class="info">İKİ ELİNİ BİRDEN GÖSTER<br>PARMAKLARININ ARASINDAKİ İPLERİ GER!</div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+
+// Ekran boyutuna göre ayarla
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// El takibi sonuçları geldiğinde çalışır
+function onResults(results) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // EĞER 2 EL VARSA ÇİZGİLERİ ÇİZ
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length >= 2) {
+        const hand1 = results.multiHandLandmarks[0];
+        const hand2 = results.multiHandLandmarks[1];
+
+        // 5 parmak ucunu eşleştir (4:Baş, 8:İşaret, 12:Orta, 16:Yüzük, 20:Serçe)
+        const tips = [4, 8, 12, 16, 20];
+
+        tips.forEach(idx => {
+            const p1 = { x: hand1[idx].x * canvas.width, y: hand1[idx].y * canvas.height };
+            const p2 = { x: hand2[idx].x * canvas.width, y: hand2[idx].y * canvas.height };
+
+            // İp Çizimi
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            
+            // Esneklik/Sarkma Hesapla (İpin ortası biraz aşağı sarksın)
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2 + 60; // 60 değeri sarkma miktarını belirler
+            
+            ctx.quadraticCurveTo(midX, midY, p2.x, p2.y);
+
+            // Stil: Neon Turkuaz
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00f5ff';
+            ctx.strokeStyle = '#00f5ff';
+            ctx.lineWidth = 5;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Stil: İç Beyaz Çizgi (Daha parlak görünmesi için)
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        });
+    }
+}
+
+// MediaPipe Ayarları
+const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+    maxNumHands: 2,           // İki el takibi şart
+    modelComplexity: 0,      // Lite model (Kasmaz)
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+});
+
+hands.onResults(onResults);
+
+// Başlat Butonu
+document.getElementById('sbtn').addEventListener('click', async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: 1280, height: 720 }
+        });
+        video.srcObject = stream;
+        overlay.classList.add('hidden');
+        
+        // Takip döngüsünü başlat
+        const timer = setInterval(async () => {
+            if (video.readyState >= 2) {
+                await hands.send({ image: video });
+            }
+        }, 40); // 25 FPS - Tablet için ideal hız
+        
+    } catch (err) {
+        alert("Kameraya erişilemedi: " + err);
+    }
+});
+</script>
+
+</body>
+</html>
